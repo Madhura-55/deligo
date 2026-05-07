@@ -3,9 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { Upload, X, Save, ArrowLeft } from 'lucide-react';
+import { Upload, X, Save, ArrowLeft, Bot, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import AIImageGenerator from '@/components/seller/AIImageGenerator';
+import SellerAssistantModal from '@/components/seller/SellerAssistantModal';
 import { toastSuccess, toastError, toastWarning, toastInfo } from '@/lib/toast';
 
 interface Category {
@@ -24,6 +25,7 @@ interface Category {
 export default function NewProductPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [showAssistantModal, setShowAssistantModal] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
@@ -199,7 +201,17 @@ export default function NewProductPage() {
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Basic Information */}
           <div className="bg-white rounded-lg shadow-sm p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Basic Information</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-900">Basic Information</h2>
+              <button
+                type="button"
+                onClick={() => setShowAssistantModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 rounded-lg font-medium hover:bg-indigo-100 transition-colors"
+              >
+                <Bot className="w-4 h-4" />
+                Open AI Assistant
+              </button>
+            </div>
             
             <div className="space-y-4">
               <div>
@@ -457,6 +469,25 @@ export default function NewProductPage() {
           </div>
         </form>
       </div>
+
+      <SellerAssistantModal 
+        isOpen={showAssistantModal} 
+        onClose={() => setShowAssistantModal(false)}
+        initialName={formData.name}
+        initialCategory={categories.find(c => c._id === formData.categoryId)?.name || ''}
+        onAutoFill={(data) => {
+          setFormData(prev => ({
+            ...prev,
+            description: data.description || prev.description,
+            seo: {
+              ...prev.seo,
+              metaTitle: data.title || prev.seo.metaTitle,
+              keywords: data.keywords || prev.seo.keywords
+            }
+          }));
+          toastSuccess('Listing details auto-filled successfully!');
+        }}
+      />
     </div>
   );
 }
