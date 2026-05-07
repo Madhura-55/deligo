@@ -8,6 +8,7 @@ import User from '@/models/User.models';
 import InventoryLog from '@/models/InventoryLogs.models';
 import { authOptions } from '@/lib/auth-options';
 import { uploadProductImage, deleteProductFolder } from '@/lib/cloudinary';
+import { indexProduct, removeProductFromIndex } from '@/lib/search';
 
 // GET - List all products for seller
 export async function GET(req: NextRequest) {
@@ -175,6 +176,36 @@ export async function POST(req: NextRequest) {
       reason: 'Initial stock',
     });
 
+    // Fetch category name for search index
+    let categoryName = '';
+    try {
+      const categoryDoc = await Category.findById(product.categoryId);
+      if (categoryDoc) categoryName = categoryDoc.name;
+    } catch (e) {
+      console.error('Failed to fetch category name for indexing');
+    }
+
+    // Add to Meilisearch index
+    try {
+      await indexProduct({
+        id: product._id.toString(),
+        seller_id: sellerProfile._id.toString(),
+        sku: product.sku,
+        name: product.name,
+        description: product.description,
+        category_id: product.categoryId.toString(),
+        category_name: categoryName,
+        price: product.price,
+        discount: product.discount,
+        images: product.images,
+        stock: product.stock,
+        status: product.status as 'active' | 'draft' | 'banned' | 'deleted',
+        seller_name: sellerProfile.businessName,
+      });
+    } catch (err) {
+      console.error('Failed to index new product in Meilisearch:', err);
+    }
+
     return NextResponse.json({
       success: true,
       data: product,
@@ -232,6 +263,11 @@ export async function DELETE(req: NextRequest) {
       { _id: { $in: productIds }, sellerId: sellerProfile._id },
       { status: 'deleted' }
     );
+
+    // Remove from search index
+    for (const id of productIds) {
+      await removeProductFromIndex(id);
+    }
 
     return NextResponse.json({
       success: true,

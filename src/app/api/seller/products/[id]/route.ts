@@ -5,8 +5,10 @@ import Product from '@/models/Products.models';
 import SellerProfile from '@/models/SellerProfiles.models';
 import User from '@/models/User.models';
 import InventoryLog from '@/models/InventoryLogs.models';
+import Category from '@/models/ProductCategories.models';
 import { authOptions } from '@/lib/auth-options';
 import { uploadProductImage, deleteMultipleCloudinaryImages } from '@/lib/cloudinary';
+import { indexProduct, removeProductFromIndex } from '@/lib/search';
 
 // GET - Get single product
 export async function GET(
@@ -149,6 +151,33 @@ export async function PUT(
       });
     }
 
+    // Update in Meilisearch
+    try {
+      let categoryName = '';
+      try {
+        const categoryDoc = await Category.findById(product.categoryId);
+        if (categoryDoc) categoryName = categoryDoc.name;
+      } catch (e) {}
+
+      await indexProduct({
+        id: product._id.toString(),
+        seller_id: sellerProfile._id.toString(),
+        sku: product.sku,
+        name: product.name,
+        description: product.description,
+        category_id: product.categoryId.toString(),
+        category_name: categoryName,
+        price: product.price,
+        discount: product.discount,
+        images: product.images,
+        stock: product.stock,
+        status: product.status as 'active' | 'draft' | 'banned' | 'deleted',
+        seller_name: sellerProfile.businessName,
+      });
+    } catch (err) {
+      console.error('Failed to update product in Meilisearch:', err);
+    }
+
     return NextResponse.json({
       success: true,
       data: product,
@@ -263,6 +292,33 @@ export async function PATCH(
       });
     }
 
+    // Update in Meilisearch
+    try {
+      let categoryName = '';
+      try {
+        const categoryDoc = await Category.findById(product.categoryId);
+        if (categoryDoc) categoryName = categoryDoc.name;
+      } catch (e) {}
+
+      await indexProduct({
+        id: product._id.toString(),
+        seller_id: sellerProfile._id.toString(),
+        sku: product.sku,
+        name: product.name,
+        description: product.description,
+        category_id: product.categoryId.toString(),
+        category_name: categoryName,
+        price: product.price,
+        discount: product.discount,
+        images: product.images,
+        stock: product.stock,
+        status: product.status as 'active' | 'draft' | 'banned' | 'deleted',
+        seller_name: sellerProfile.businessName,
+      });
+    } catch (err) {
+      console.error('Failed to update product in Meilisearch:', err);
+    }
+
     return NextResponse.json({
       success: true,
       data: product,
@@ -315,6 +371,9 @@ export async function DELETE(
     // Soft delete
     product.status = 'deleted';
     await product.save();
+
+    // Remove from Meilisearch
+    await removeProductFromIndex(id);
 
     return NextResponse.json({
       success: true,
