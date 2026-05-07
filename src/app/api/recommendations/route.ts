@@ -7,11 +7,15 @@
  * - Personalized: ML-based (collaborative + content-based hybrid)
  * - Similar: Content-based similar products
  * - Also-bought: Collaborative filtering based on purchase patterns
+ * 
+ * When the ML server returns empty results (models not trained, cold start),
+ * uses intelligent DB-level fallbacks that differentiate each recommendation type.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { dbConnect } from '@/lib/db';
 import Product from '@/models/Products.models';
+import Order from '@/models/Orders.models';
 import mongoose from 'mongoose';
 
 const RECOMMENDATION_SERVER_URL = process.env.RECOMMENDATION_SERVER_URL || 'http://localhost:8000';
@@ -85,14 +89,21 @@ export async function GET(request: NextRequest) {
 
       if (response.ok) {
         const data = await response.json();
-        return NextResponse.json({
-          success: true,
-          recommendations: data.recommendations || [],
-          count: data.recommendations?.length || 0,
-          type,
-          timestamp: new Date().toISOString(),
-          source: 'ml_engine'
-        });
+        const recs = data.recommendations || [];
+        
+        // If ML server returned actual recommendations, use them
+        if (recs.length > 0) {
+          return NextResponse.json({
+            success: true,
+            recommendations: recs,
+            count: recs.length,
+            type,
+            timestamp: new Date().toISOString(),
+            source: 'ml_engine'
+          });
+        }
+        // Otherwise fall through to DB fallback
+        console.log(`ML server returned empty ${type} recommendations, using DB fallback`);
       }
     } catch (err) {
       clearTimeout(timeoutId);
@@ -120,7 +131,8 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Fallback to database when Python server is unavailable
+ * Fallback to database when Python server is unavailable or returns empty results.
+ * Uses different strategies per recommendation type to ensure sections show distinct products.
  */
 async function getFallbackRecommendations(
   type: string, 
@@ -131,30 +143,114 @@ async function getFallbackRecommendations(
 ) {
   await dbConnect();
 
-  const query: Record<string, unknown> = { status: 'active' };
+  const query: Record<string, unknown> = { status: 'active', stock: { $gt: 0 } };
   if (category) {
     query.categoryId = new mongoose.Types.ObjectId(category);
   }
 
-  // For similar products, get same category
-  if ((type === 'similar' || type === 'also-bought') && productId) {
-    const product = await Product.findById(productId).select('categoryId');
-    if (product?.categoryId) {
-      query.categoryId = product.categoryId;
-      query._id = { $ne: new mongoose.Types.ObjectId(productId) };
+  let products;
+  let explanationText = 'Popular product';
+
+  switch (type) {
+    case 'trending': {
+      // Trending: products with highest views + orders, biased toward recency
+      products = await Product.find(query)
+        .sort({ viewCount: -1, orderCount: -1, updatedAt: -1 })
+        .limit(limit)
+        .select('_id name viewCount orderCount');
+      explanationText = 'Trending based on recent activity';
+      break;
+    }
+
+    case 'personalized': {
+      // Personalized: try to find products based on user's past order categories,
+      // otherwise pick highest-rated or most-discounted products (distinct from trending)
+      if (userId) {
+        try {
+          // Get categories the user has ordered from
+          const userOrders = await Order.find({ userId: new mongoose.Types.ObjectId(userId) })
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .select('items')
+            .lean();
+
+          const orderedProductIds = userOrders.flatMap(
+            (order: { items?: Array<{ productId?: mongoose.Types.ObjectId }> }) =>
+              (order.items || []).map((item) => item.productId).filter(Boolean)
+          );
+
+          if (orderedProductIds.length > 0) {
+            // Get categories from ordered products
+            const orderedProducts = await Product.find({ _id: { $in: orderedProductIds } })
+              .select('categoryId')
+              .lean();
+            const categoryIds = Array.from(new Set(orderedProducts.map(
+              (p: { categoryId?: mongoose.Types.ObjectId }) => p.categoryId?.toString()
+            ).filter(Boolean))) as string[];
+
+            if (categoryIds.length > 0) {
+              // Recommend from same categories but different products
+              const personalizedQuery = {
+                ...query,
+                categoryId: { $in: categoryIds.map(id => new mongoose.Types.ObjectId(id)) },
+                _id: { $nin: orderedProductIds },
+              };
+              products = await Product.find(personalizedQuery)
+                .sort({ orderCount: -1, viewCount: -1 })
+                .limit(limit)
+                .select('_id name viewCount orderCount');
+              explanationText = 'Based on your purchase history';
+            }
+          }
+        } catch (err) {
+          console.error('Error building personalized fallback:', err);
+        }
+      }
+
+      // If no user history or no results from categories, use a distinct sort:
+      // highest discount + best rated — intentionally different from trending's viewCount sort
+      if (!products || products.length === 0) {
+        products = await Product.find(query)
+          .sort({ discount: -1, orderCount: -1, createdAt: -1 })
+          .limit(limit)
+          .select('_id name viewCount orderCount');
+        explanationText = 'Top picks for you';
+      }
+      break;
+    }
+
+    case 'similar':
+    case 'also-bought': {
+      // For similar / also-bought: use same category as the source product
+      if (productId) {
+        const product = await Product.findById(productId).select('categoryId');
+        if (product?.categoryId) {
+          query.categoryId = product.categoryId;
+          query._id = { $ne: new mongoose.Types.ObjectId(productId) };
+        }
+      }
+      products = await Product.find(query)
+        .sort({ orderCount: -1, viewCount: -1 })
+        .limit(limit)
+        .select('_id name viewCount orderCount');
+      explanationText = type === 'similar' ? 'Similar product' : 'Frequently bought together';
+      break;
+    }
+
+    default: {
+      products = await Product.find(query)
+        .sort({ viewCount: -1, orderCount: -1 })
+        .limit(limit)
+        .select('_id name viewCount');
+      break;
     }
   }
 
-  const products = await Product.find(query)
-    .sort({ viewCount: -1, orderCount: -1 })
-    .limit(limit)
-    .select('_id name viewCount');
-
-  const recommendations: RecommendationItem[] = products.map((p, index) => ({
+  const recommendations: RecommendationItem[] = (products || []).map((p, index) => ({
     product_id: p._id.toString(),
     score: 1 - (index * 0.1),
     source: 'database_fallback',
-    explanation: 'Popular product'
+    explanation: explanationText
   }));
 
   return NextResponse.json({

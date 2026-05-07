@@ -452,7 +452,7 @@ export async function isSearchServerAvailable(): Promise<boolean> {
  * Convert search server response to legacy format for backward compatibility.
  */
 export function convertToLegacyFormat(response: SearchResponse): {
-  products: ProductResult[];
+  products: Array<ProductResult & { _id: string; image?: string; categoryName?: string; reviewCount?: number }>;
   totalProducts: number;
   currentPage: number;
   totalPages: number;
@@ -460,7 +460,13 @@ export function convertToLegacyFormat(response: SearchResponse): {
   hasPrevPage: boolean;
 } {
   return {
-    products: response.products,
+    products: response.products.map((product) => ({
+      ...product,
+      _id: product.id,                              // Map id → _id for frontend compatibility
+      image: product.images?.[0],                    // Map first image for convenience
+      categoryName: product.category_name,           // snake_case → camelCase
+      reviewCount: product.review_count,             // snake_case → camelCase
+    })),
     totalProducts: response.total_hits,
     currentPage: response.page,
     totalPages: response.total_pages,

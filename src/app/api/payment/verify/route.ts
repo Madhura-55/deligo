@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     if (directItems && directItems.length > 0) {
       // Direct purchase - get products from the provided items
       const productIds = directItems.map((item: { productId: string; quantity: number }) => item.productId);
-      const products = await Product.find({ _id: { $in: productIds } }).populate('sellerId');
+      const products = await Product.find({ _id: { $in: productIds } });
       
       cartItems = {
         items: directItems.map((item: { productId: string; quantity: number }) => {
@@ -100,7 +100,8 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const sellerId = product.sellerId.toString();
+      // Safely extract sellerId — handles both populated (object) and unpopulated (ObjectId) cases
+      const sellerId = (product.sellerId?._id || product.sellerId).toString();
       if (!sellerGroups.has(sellerId)) {
         sellerGroups.set(sellerId, []);
       }

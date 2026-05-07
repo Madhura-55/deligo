@@ -92,7 +92,7 @@ meilisearch
 
 *.sh
 
-notes/
+
 *.pkl
 
 CSE.zip
@@ -102,4 +102,5 @@ recommendation-server/
 search-server/
 
 ppt/
+notes/
 Report/
