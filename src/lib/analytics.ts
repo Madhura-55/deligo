@@ -29,31 +29,34 @@ export function getDateRange(period: 'daily' | 'weekly' | 'monthly' | 'yearly'):
   return { startDate, endDate };
 }
 
+import mongoose from 'mongoose';
+
 /**
  * Get seller dashboard metrics
  */
 export async function getSellerDashboardMetrics(sellerId: string) {
   await dbConnect();
+  const sellerObjectId = new mongoose.Types.ObjectId(sellerId);
 
   // Total orders
-  const totalOrders = await Order.countDocuments({ sellerId });
+  const totalOrders = await Order.countDocuments({ sellerId: sellerObjectId });
 
   // Total revenue
   const revenueData = await Order.aggregate([
-    { $match: { sellerId, status: { $in: ['delivered', 'shipped'] } } },
+    { $match: { sellerId: sellerObjectId, status: { $in: ['delivered', 'shipped', 'confirmed'] } } },
     { $group: { _id: null, total: { $sum: '$totalAmount' } } }
   ]);
   const totalRevenue = revenueData[0]?.total || 0;
 
   // Active listings
-  const activeListings = await Product.countDocuments({ sellerId, status: 'active' });
+  const activeListings = await Product.countDocuments({ sellerId: sellerObjectId, status: 'active' });
 
   // Pending orders
-  const pendingOrders = await Order.countDocuments({ sellerId, status: 'pending' });
+  const pendingOrders = await Order.countDocuments({ sellerId: sellerObjectId, status: 'pending' });
 
   // Low stock products
   const lowStockProducts = await Product.find({
-    sellerId,
+    sellerId: sellerObjectId,
     status: 'active',
     $expr: { $lte: ['$stock', '$lowStockThreshold'] }
   })
@@ -62,7 +65,7 @@ export async function getSellerDashboardMetrics(sellerId: string) {
   .lean();
 
   // Average rating
-  const products = await Product.find({ sellerId }).select('_id');
+  const products = await Product.find({ sellerId: sellerObjectId }).select('_id');
   const productIds = products.map(p => p._id);
   
   const ratingData = await Review.aggregate([
@@ -90,11 +93,12 @@ export async function getSellerDashboardMetrics(sellerId: string) {
 export async function getSalesAnalytics(sellerId: string, period: 'daily' | 'weekly' | 'monthly' | 'yearly') {
   await dbConnect();
   const { startDate, endDate } = getDateRange(period);
+  const sellerObjectId = new mongoose.Types.ObjectId(sellerId);
 
   const salesData = await Order.aggregate([
     {
       $match: {
-        sellerId,
+        sellerId: sellerObjectId,
         createdAt: { $gte: startDate, $lte: endDate },
         status: { $in: ['delivered', 'shipped', 'confirmed'] }
       }
@@ -121,14 +125,19 @@ export async function getSalesAnalytics(sellerId: string, period: 'daily' | 'wee
  */
 export async function getTopSellingProducts(sellerId: string, limit = 10) {
   await dbConnect();
+  const sellerObjectId = new mongoose.Types.ObjectId(sellerId);
 
-  const topProducts = await Product.find({ sellerId, status: 'active' })
+  const topProducts = await Product.find({ sellerId: sellerObjectId, status: 'active' })
     .sort({ orderCount: -1 })
     .limit(limit)
     .select('name sku price orderCount viewCount')
     .lean();
 
-  return topProducts;
+  return topProducts.map((p: any) => ({
+    ...p,
+    totalSales: p.orderCount || 0,
+    revenue: (p.orderCount || 0) * (p.price || 0)
+  }));
 }
 
 /**
@@ -136,8 +145,9 @@ export async function getTopSellingProducts(sellerId: string, limit = 10) {
  */
 export async function getProductPerformance(sellerId: string) {
   await dbConnect();
+  const sellerObjectId = new mongoose.Types.ObjectId(sellerId);
 
-  const products = await Product.find({ sellerId, status: 'active' }).lean();
+  const products = await Product.find({ sellerId: sellerObjectId, status: 'active' }).lean();
 
   const performance = products.map(product => ({
     id: product._id,
@@ -162,8 +172,9 @@ export async function getProductPerformance(sellerId: string) {
  */
 export async function getPayoutSummary(sellerId: string, period?: 'daily' | 'weekly' | 'monthly' | 'yearly') {
   await dbConnect();
+  const sellerObjectId = new mongoose.Types.ObjectId(sellerId);
 
-  const query: Record<string, unknown> = { sellerId };
+  const query: Record<string, unknown> = { sellerId: sellerObjectId };
   
   if (period) {
     const { startDate, endDate } = getDateRange(period);
@@ -208,9 +219,10 @@ export async function getPayoutSummary(sellerId: string, period?: 'daily' | 'wee
  */
 export async function getOrderStatusDistribution(sellerId: string) {
   await dbConnect();
+  const sellerObjectId = new mongoose.Types.ObjectId(sellerId);
 
   const statusData = await Order.aggregate([
-    { $match: { sellerId } },
+    { $match: { sellerId: sellerObjectId } },
     {
       $group: {
         _id: '$status',
@@ -237,6 +249,7 @@ export function calculateCommission(amount: number, commissionRate = 0.10): numb
  */
 export async function getRevenueTrend(sellerId: string, days = 30) {
   await dbConnect();
+  const sellerObjectId = new mongoose.Types.ObjectId(sellerId);
 
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
@@ -244,7 +257,7 @@ export async function getRevenueTrend(sellerId: string, days = 30) {
   const trendData = await Order.aggregate([
     {
       $match: {
-        sellerId,
+        sellerId: sellerObjectId,
         createdAt: { $gte: startDate },
         status: { $in: ['delivered', 'shipped', 'confirmed'] }
       }
