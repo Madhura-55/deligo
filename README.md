@@ -5,7 +5,7 @@
 <h1 align="center">🛒 Deligo - Modern E-Commerce Platform</h1>
 
 <p align="center">
-  <strong>A full-stack, production-ready e-commerce platform built with Next.js 15, MongoDB, and TypeScript</strong>
+  <strong>A full-stack, AI-powered e-commerce platform built with Next.js 15, MongoDB, XGBoost ML, and TypeScript</strong>
 </p>
 
 <p align="center">
@@ -52,11 +52,12 @@
 ### 🎯 Key Highlights
 
 - **Multi-Vendor Marketplace**: Support for multiple sellers with individual storefronts
+- **AI Demand Prediction**: XGBoost ML model forecasts per-product demand with stock shortage alerts
 - **Real-Time Tracking**: Live order and delivery tracking with OTP verification
 - **Secure Payments**: Integrated Razorpay payment gateway with webhook support
 - **Role-Based Access**: Five distinct user roles with granular permissions
 - **Mobile-First Design**: Fully responsive design optimized for all devices
-- **Analytics Dashboard**: Comprehensive insights for admins and sellers
+- **Analytics Dashboard**: Comprehensive insights for admins and sellers with AI-powered forecasting
 - **Rate Limiting**: Built-in protection against abuse with Upstash Redis
 
 ---
@@ -81,9 +82,11 @@
 | **Seller Dashboard** | Comprehensive analytics with revenue, orders, and views |
 | **Product Management** | Full CRUD operations with image upload via Cloudinary |
 | **Inventory Control** | Stock management with low-stock alerts |
+| **AI Demand Forecasting** | XGBoost ML-powered 14-day demand predictions per product with interactive charts |
+| **AI Inventory Alerts** | Automatic stock shortage warnings when predicted demand exceeds current inventory |
 | **Order Management** | View and update order statuses |
 | **Storefront Customization** | Logo, banner, and bio customization |
-| **Sales Analytics** | Daily, weekly, monthly, and yearly reports |
+| **Sales Analytics** | Daily, weekly, monthly, and yearly reports with trend visualization |
 | **PDF Invoices** | Generate downloadable invoices |
 | **CSV/Excel Export** | Export sales data for external analysis |
 | **KYC Management** | Submit business documents for verification |
@@ -150,6 +153,15 @@
 | **Razorpay** | 2.9.6 | Payment gateway |
 | **Nodemailer** | 6.10.1 | Email service |
 | **Cloudinary** | 2.8.0 | Image management |
+
+### AI/ML Microservices
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **FastAPI** | 0.100+ | ML prediction API server |
+| **XGBoost** | 2.0+ | Per-product demand regression model |
+| **Meta Prophet** | Latest | Global seasonality baseline model |
+| **Pandas** | 2.0+ | Data pipeline & feature engineering |
+| **scikit-learn** | Latest | Model evaluation metrics |
 
 ### DevOps & Utilities
 | Technology | Version | Purpose |
@@ -303,12 +315,25 @@ deligo/
 │   ├── middleware.ts             # Route middleware
 │   └── type.d.ts                 # Global types
 │
+├── 📂 demand-server/             # AI Demand Prediction Microservice
+│   ├── main.py                   # FastAPI server (port 8004)
+│   ├── train.py                  # XGBoost + Prophet training pipeline
+│   ├── data_pipeline.py          # MongoDB → daily demand DataFrame
+│   ├── feature_engineering.py    # Lag, rolling, calendar features
+│   ├── requirements.txt          # Python dependencies
+│   ├── models/                   # Trained model artifacts
+│   └── README.md                 # Detailed ML documentation
+│
+├── 📂 recommendation-server/     # Product recommendation engine
+├── 📂 search-server/             # Meilisearch integration
+│
 ├── 📂 notes/                     # Documentation
 │   ├── ADMIN_DASHBOARD_README.md
 │   ├── COMPLETE_FEATURES_SUMMARY.md
 │   ├── api.md
 │   └── ...
 │
+├── start-dev.sh                  # Unified dev server launcher
 ├── next.config.ts                # Next.js configuration
 ├── tailwind.config.js            # Tailwind CSS config
 ├── tsconfig.json                 # TypeScript config
@@ -372,7 +397,12 @@ Before you begin, ensure you have the following installed:
 
 | Command | Description |
 |---------|-------------|
-| `npm run dev` | Start development server with Turbopack |
+| `npm run dev` | Start **all servers** (Next.js + Recommendation + Search + Demand Forecast) |
+| `npm run dev:next` | Start only the Next.js frontend (port 3000) |
+| `npm run dev:demand` | Start only the AI Demand Prediction server (port 8004) |
+| `npm run dev:recommendation` | Start only the Recommendation server (port 8000) |
+| `npm run dev:search` | Start only the Search server (port 8002) |
+| `npm run setup:all` | Set up Python virtual environments for all microservices |
 | `npm run build` | Create production build |
 | `npm run start` | Start production server |
 | `npm run lint` | Run ESLint |
@@ -622,6 +652,16 @@ Deligo uses MongoDB with Mongoose ODM. Below is an overview of the main collecti
 | `GET` | `/api/delivery/assignments` | Get assignments | Driver |
 | `POST` | `/api/delivery/assignments/:id/accept` | Accept assignment | Driver |
 | `POST` | `/api/delivery/assignments/:id/deliver` | Confirm delivery | Driver |
+
+### AI Demand Prediction APIs
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `GET` | `/api/seller/demand?action=forecast&productId=X&days=7` | Get demand forecast for a product | Seller |
+| `GET` | `/api/seller/demand?action=all-forecasts&days=14&limit=20` | Get forecasts for top seller products (parallel) | Seller |
+| `GET` | `/api/seller/demand?action=alerts&days=7` | Get AI stock shortage alerts | Seller |
+
+> **Note:** These Next.js API routes proxy to the Python ML microservice on port 8004. See [`demand-server/README.md`](./demand-server/README.md) for the raw ML API documentation.
 
 ---
 
@@ -901,6 +941,8 @@ npm run test:coverage
 - **Rate Limiting**: Prevents API abuse
 - **Database Indexing**: Optimized MongoDB queries
 - **Connection Pooling**: Mongoose connection pooling
+- **ML In-Memory Caching**: Demand prediction server caches 80K+ rows in memory with 5-minute TTL
+- **Parallel Forecast Fetching**: `Promise.all()` for concurrent product forecasts instead of sequential
 
 ### Recommended Improvements
 
@@ -909,6 +951,7 @@ npm run test:coverage
 - [ ] Implement infinite scroll pagination
 - [ ] Add CDN for static assets
 - [ ] Database query optimization with aggregation pipelines
+- [ ] Pre-calculate demand forecasts in nightly batch jobs
 
 ---
 
